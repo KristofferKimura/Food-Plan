@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Food Plan</title>
+<style>
+  :root { --bg:#faf7f2; --card:#fff; --ink:#2b2b2b; --muted:#777; --accent:#e07a2f; --line:#e6dfd3; --ok:#3b8a4f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 20px 0; max-width:900px; margin:0 auto; }
+  h1 { margin:0 0 12px; font-size:1.5rem; }
+  nav { display:flex; gap:6px; border-bottom:2px solid var(--line); }
+  nav button { background:none; border:none; padding:10px 16px; font-size:1rem; cursor:pointer; color:var(--muted); border-bottom:3px solid transparent; margin-bottom:-2px; }
+  nav button.active { color:var(--accent); border-color:var(--accent); font-weight:600; }
+  main { max-width:900px; margin:0 auto; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:12px; }
+  button.btn { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px; font-size:1rem; cursor:pointer; }
+  button.btn.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  button.small { padding:5px 10px; font-size:.85rem; border-radius:6px; }
+  button.btn:hover { filter:brightness(.95); }
+  input[type=text], textarea, select { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; }
+  textarea { min-height:90px; resize:vertical; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:140px; }
+  .day { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .day .name { width:100px; font-weight:700; color:var(--accent); }
+  .day .dish { flex:1; min-width:160px; }
+  .day .dish strong { display:block; font-size:1.05rem; }
+  .day .dish small { color:var(--muted); }
+  .locked { border-color:var(--accent); background:#fff8f1; }
+  .muted { color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+  .chip { background:#f1ece3; border-radius:999px; padding:2px 10px; font-size:.8rem; }
+  ul.shop { list-style:none; padding:0; margin:0; }
+  ul.shop li { padding:9px 4px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; }
+  ul.shop li.done span { text-decoration:line-through; color:var(--muted); }
+  ul.shop input { width:20px; height:20px; }
+  .count { color:var(--muted); font-size:.85rem; }
+  .hidden { display:none; }
+  .chk { display:flex; align-items:center; gap:8px; color:var(--ink); font-size:1rem; margin-top:10px; cursor:pointer; }
+  details.card summary { list-style:revert; }
+  @media (max-width:520px){ .day .name{width:100%;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍽️ Family Food Plan <small id="syncStatus" style="font-size:.8rem;font-weight:400;color:var(--muted);margin-left:8px"></small></h1>
+  <nav>
+    <button data-tab="week" class="active">Week</button>
+    <button data-tab="dishes">Dishes</button>
+    <button data-tab="shop">Shopping list</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-week"></section>
+  <section id="tab-dishes" class="hidden"></section>
+  <section id="tab-shop" class="hidden"></section>
+</main>
+
+<script>
+const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const KEY = "familyFoodPlan.v1";
+const TYPES = [["chicken","🍗 Chicken"],["beef","🥩 Beef / minced meat"],["pork","🐖 Pork"],["fish","🐟 Fish / seafood"],["veg","🥦 Vegetarian"],["other","🍝 Other"]];
+function defaultSettings() { return { maxType: 2, minFish: 1, weekend: true, excluded: [] }; }
+function ensureSettings() {
+  const s = Object.assign(defaultSettings(), state.settings || {});
+  if (!Array.isArray(s.excluded)) s.excluded = [];
+  state.settings = s;
+}
+
+const SEED = {
+  dishes: [
+    { id: "d1", name: "Tacos", type: "beef", weekend: true, ingredients: ["taco shells","minced meat","taco spice","lettuce","tomato","cheese","sour cream"] },
+    { id: "d2", name: "Spaghetti bolognese", type: "beef", weekend: false, ingredients: ["spaghetti","minced meat","tomato sauce","onion","carrot"] },
+    { id: "d3", name: "Fish cakes with potatoes", type: "fish", weekend: false, ingredients: ["fish cakes","potatoes","carrot","onion sauce"] },
+    { id: "d4", name: "Chicken curry with rice", type: "chicken", weekend: false, ingredients: ["chicken","curry paste","coconut milk","rice","onion"] },
+    { id: "d5", name: "Pizza", type: "other", weekend: true, ingredients: ["pizza dough","tomato sauce","cheese","ham","bell pepper"] }
+  ],
+  week: {},   // { "0": {dishId, locked}, ... }
+  checked: {} // shopping list ticks
+};
+
+let state = load();
+ensureSettings();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return Object.assign({week:{}, checked:{}, dishes:[], updatedAt:0}, JSON.parse(raw));
+  } catch (e) {}
+  return Object.assign(JSON.parse(JSON.stringify(SEED)), { updatedAt: 0 });
+}
+function persistLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+function save() { state.updatedAt = Date.now(); persistLocal(); schedulePush(); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function dishById(id) { return state.dishes.find(d => d.id === id); }
+function uid() { return "d" + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function parseIngredients(text) {
+  return text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+}
+
+/* ---------- Tabs ---------- */
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  ["week","dishes","shop"].forEach(t => document.getElementById("tab-"+t).classList.toggle("hidden", t !== name));
+  render();
+}
+
+/* ---------- Random generation ---------- */
+let genNote = "";
+let filtersOpen = false;
+const typeOf = id => { const d = dishById(id); return d ? (d.type || "other") : "other"; };
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function typeEmoji(d) { const t = TYPES.find(x => x[0] === (d.type || "other")); return t ? t[1].split(" ")[0] : "🍽️"; }
+
+// Dishes that may be planned on day i, given what is already in the week
+function candidates(i, week, typeCount, used, rules) {
+  const isWeekend = i >= 5; // Saturday, Sunday
+  return state.dishes.filter(d => {
+    const t = d.type || "other";
+    if (rules.excluded.includes(t)) return false;
+    if (rules.avoidId === d.id) return false;
+    if (!rules.allowRepeat && used.has(d.id)) return false;
+    if (rules.weekend && !isWeekend && d.weekend) return false;
+    if (t !== "other") { // "other" (pasta, pizza, soup...) is exempt from variety rules
+      if (rules.maxType && (typeCount[t] || 0) >= rules.maxType) return false;
+      if (rules.adjacent) for (const j of [i - 1, i + 1]) { const n = week[j]; if (n && typeOf(n.dishId) === t) return false; }
+    }
+    return true;
+  });
+}
+
+// One random attempt at filling freeDays. Returns a full week or null if it got stuck.
+function attempt(base, freeDays, rules) {
+  const week = Object.assign({}, base);
+  const typeCount = {}, used = new Set();
+  Object.values(week).forEach(w => { used.add(w.dishId); const t = typeOf(w.dishId); typeCount[t] = (typeCount[t] || 0) + 1; });
+  const order = shuffle(freeDays);
+  const need = Math.max(0, rules.minFish - (typeCount.fish || 0));
+  const fishDays = order.slice(0, need);
+  const seq = fishDays.concat(order.slice(need)); // place the required fish dinners first
+  for (const i of seq) {
+    let c = candidates(i, week, typeCount, used, rules);
+    if (fishDays.includes(i)) c = c.filter(d => d.type === "fish");
+    if (rules.weekend && i >= 5) { const pref = c.filter(d => d.weekend); if (pref.length) c = pref; } // weekend days prefer weekend dishes
+    if (!c.length) return null;
+    const d = c[Math.floor(Math.random() * c.length)];
+    week[i] = { dishId: d.id, locked: false };
+    used.add(d.id); const t = d.type || "other"; typeCount[t] = (typeCount[t] || 0) + 1;
+  }
+  if ((typeCount.fish || 0) < rules.minFish) return null;
+  return week;
+}
+
+// Try the strict rules first; if impossible with the dishes you have, relax one rule at a time and say which.
+function build(base, freeDays, avoidId) {
+  const s = state.settings;
+  const rules = { excluded: s.excluded, maxType: s.maxType, adjacent: true, weekend: s.weekend,
+    minFish: s.excluded.includes("fish") ? 0 : s.minFish, allowRepeat: false, avoidId: avoidId || null };
+  const steps = [
+    [null, {}],
+    ["same food type on back-to-back days", { adjacent: false }],
+    ["the max-per-type limit", { maxType: 0 }],
+    ["weekend dishes only on Sat/Sun", { weekend: false }],
+    ["the fish requirement (add more fish dishes)", { minFish: 0 }],
+    ["no repeated dishes (add more dishes)", { allowRepeat: true }]
+  ];
+  const relaxed = [];
+  for (const [label, change] of steps) {
+    if (label) {
+      if (!Object.keys(change).some(k => rules[k] !== change[k])) continue;
+      Object.assign(rules, change); relaxed.push(label);
+    }
+    for (let n = 0; n < 150; n++) { const w = attempt(base, freeDays, rules); if (w) return { week: w, relaxed }; }
+  }
+  return { week: null, relaxed };
+}
+function relaxNote(relaxed) { return relaxed.length ? "Couldn't follow every filter with your current dishes, so I relaxed: " + relaxed.join(", ") + "." : ""; }
+
+function generateWeek() {
+  if (!state.dishes.length) { alert("Add some dishes first."); return; }
+  const base = {}, free = [];
+  DAYS.forEach((_, i) => {
+    const w = state.week[i];
+    if (w && w.locked && w.dishId && dishById(w.dishId)) base[i] = { dishId: w.dishId, locked: true }; else free.push(i);
+  });
+  const res = build(base, free);
+  if (!res.week) { alert("No dishes match your filters. Check “Include food types”."); return; }
+  state.week = res.week;
+  genNote = relaxNote(res.relaxed);
+  state.checked = {};
+  save(); render();
+}
+function rerollDay(i) {
+  const base = {};
+  DAYS.forEach((_, j) => { const w = state.week[j]; if (j !== i && w && w.dishId && dishById(w.dishId)) base[j] = w; });
+  const cur = state.week[i] || {};
+  const res = build(base, [i], cur.dishId);
+  if (!res.week || !res.week[i]) { alert("No other dish fits this day with your filters."); return; }
+  state.week[i] = { dishId: res.week[i].dishId, locked: !!cur.locked };
+  genNote = relaxNote(res.relaxed);
+  state.checked = {};
+  save(); render();
+}
+
+/* ---------- Filters panel ---------- */
+function filtersHtml() {
+  const s = state.settings;
+  const sel = (id, opts, cur) => `<select id="${id}" style="width:auto">${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  return `<details class="card" id="filters" ${filtersOpen ? "open" : ""}>
+    <summary style="cursor:pointer;font-weight:600">⚙️ Filters for “Generate”</summary>
+    <div class="row" style="margin-top:12px"><span>Max of the same food type per week:</span>
+      ${sel("fMax", [[0, "No limit"], [1, "1"], [2, "2"], [3, "3"]], s.maxType)}</div>
+    <div class="row" style="margin-top:10px"><span>Fish / seafood dinners, at least:</span>
+      ${sel("fFish", [[0, "0 (off)"], [1, "1"], [2, "2"]], s.minFish)}</div>
+    <label class="chk"><input type="checkbox" id="fWeekend" ${s.weekend ? "checked" : ""}> Keep 🎉 weekend dishes for Saturday &amp; Sunday</label>
+    <label>Include these food types:</label>
+    <div class="row">${TYPES.map(([k, l]) => `<label class="chk" style="margin:0"><input type="checkbox" data-ftype="${k}" ${s.excluded.includes(k) ? "" : "checked"}> ${l}</label>`).join("")}</div>
+    <p class="muted" style="margin-bottom:0;font-size:.85rem">The same food type is never planned on back-to-back days when it can be avoided. “Other” (pasta, pizza, soup…) is exempt from these limits. Locked days always stay.</p>
+  </details>` + (genNote ? `<div class="card" style="border-color:#e0b44f;background:#fff9e8">⚠️ ${esc(genNote)}</div>` : "");
+}
+function bindFilters(el) {
+  const d = el.querySelector("#filters");
+  d.addEventListener("toggle", () => { filtersOpen = d.open; });
+  const upd = () => {
+    const s = state.settings;
+    s.maxType = +el.querySelector("#fMax").value;
+    s.minFish = +el.querySelector("#fFish").value;
+    s.weekend = el.querySelector("#fWeekend").checked;
+    s.excluded = [...el.querySelectorAll("[data-ftype]")].filter(c => !c.checked).map(c => c.dataset.ftype);
+    save();
+  };
+  d.querySelectorAll("select, input").forEach(x => x.onchange = upd);
+}
+
+/* ---------- Render: Week ---------- */
+function renderWeek() {
+  let html = `<div class="row" style="margin-bottom:14px">
+    <button class="btn" id="gen">🎲 Generate random week</button>
+    <button class="btn secondary" id="clearWeek">Clear week</button>
+  </div>`;
+  html += filtersHtml();
+  DAYS.forEach((day, i) => {
+    const w = state.week[i] || {};
+    const d = w.dishId ? dishById(w.dishId) : null;
+    const opts = `<option value="">— none —</option>` + state.dishes.map(x => `<option value="${x.id}" ${x.id===w.dishId?"selected":""}>${esc(x.name)}</option>`).join("");
+    html += `<div class="card day ${w.locked?"locked":""}">
+      <div class="name">${day}</div>
+      <div class="dish">${d ? `<strong>${typeEmoji(d)} ${esc(d.name)}${d.weekend ? " 🎉" : ""}</strong><small>${d.ingredients.length} ingredient${d.ingredients.length===1?"":"s"}</small>` : `<span class="muted">Nothing planned</span>`}</div>
+      <select data-pick="${i}" style="width:auto;max-width:180px">${opts}</select>
+      <button class="btn secondary small" data-reroll="${i}" title="New random dish">🎲</button>
+      <button class="btn secondary small" data-lock="${i}" title="Keep this dish when generating">${w.locked?"🔒":"🔓"}</button>
+    </div>`;
+  });
+  html += `<p class="muted">Tip: lock (🔒) the days you like, then press “Generate” again to re-roll only the rest.</p>`;
+  const el = document.getElementById("tab-week");
+  el.innerHTML = html;
+  el.querySelector("#gen").onclick = generateWeek;
+  bindFilters(el);
+  el.querySelector("#clearWeek").onclick = () => { if (confirm("Clear the whole week?")) { state.week = {}; state.checked = {}; genNote = ""; save(); render(); } };
+  el.querySelectorAll("[data-reroll]").forEach(b => b.onclick = () => rerollDay(+b.dataset.reroll));
+  el.querySelectorAll("[data-lock]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.lock; const w = state.week[i] || {};
+    if (!w.dishId) return;
+    w.locked = !w.locked; state.week[i] = w; save(); render();
+  });
+  el.querySelectorAll("[data-pick]").forEach(s => s.onchange = () => {
+    const i = +s.dataset.pick;
+    state.week[i] = { dishId: s.value || null, locked: !!(state.week[i] && state.week[i].locked) };
+    state.checked = {}; save(); render();
+  });
+}
+
+/* ---------- Render: Dishes ---------- */
+let editingId = null;
+function renderDishes() {
+  const ed = editingId ? dishById(editingId) : null;
+  let html = `<div class="card">
+    <strong>${ed ? "Edit dish" : "Add a dish"}</strong>
+    <label>Dish name</label>
+    <input type="text" id="dName" placeholder="e.g. Lasagne" value="${ed ? esc(ed.name) : ""}">
+    <label>Food type (used so the plan doesn't repeat the same kind too often)</label>
+    <select id="dType">${TYPES.map(([k, l]) => `<option value="${k}" ${(ed ? (ed.type || "other") : "other") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <label class="chk"><input type="checkbox" id="dWeekend" ${ed && ed.weekend ? "checked" : ""}> 🎉 Weekend dish (only planned on Saturday / Sunday)</label>
+    <label>What we need to buy (one per line or comma separated)</label>
+    <textarea id="dIng" placeholder="lasagne sheets&#10;minced meat&#10;tomato sauce&#10;cheese">${ed ? esc(ed.ingredients.join("\n")) : ""}</textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="saveDish">${ed ? "Save changes" : "Add dish"}</button>
+      ${ed ? `<button class="btn secondary" id="cancelEdit">Cancel</button>` : ""}
+    </div>
+  </div>
+  <h3>All dishes (${state.dishes.length})</h3>`;
+  if (!state.dishes.length) html += `<p class="muted">No dishes yet.</p>`;
+  state.dishes.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(d => {
+    html += `<div class="card">
+      <div class="row"><strong class="grow">${typeEmoji(d)} ${esc(d.name)}${d.weekend ? ` <span class="chip">🎉 Weekend</span>` : ""}</strong>
+        <button class="btn secondary small" data-edit="${d.id}">Edit</button>
+        <button class="btn secondary small" data-del="${d.id}">Delete</button></div>
+      <div class="chips">${d.ingredients.map(i => `<span class="chip">${esc(i)}</span>`).join("") || `<span class="muted">No ingredients</span>`}</div>
+    </div>`;
+  });
+  html += `<h3>Backup & sharing</h3>
+  <div class="card">
+    <strong>Shared sync (you + partner)</strong>
+    <p class="muted">Paste the same database link on every device to share one plan live. Leave empty to keep data on this device only.</p>
+    <input type="text" id="syncUrl" placeholder="https://your-project-default-rtdb.europe-west1.firebasedatabase.app" value="${esc(syncUrl())}">
+    <div class="row" style="margin:8px 0 16px"><button class="btn small" id="saveSync">Save &amp; connect</button></div>
+    <strong>Manual backup</strong>
+    <p class="muted">Export/import a file to back up or move data by hand.</p>
+    <div class="row">
+      <button class="btn secondary" id="exp">⬇ Export</button>
+      <button class="btn secondary" id="imp">⬆ Import</button>
+      <input type="file" id="impFile" accept="application/json" class="hidden">
+    </div>
+  </div>`;
+  const el = document.getElementById("tab-dishes");
+  el.innerHTML = html;
+  el.querySelector("#saveDish").onclick = () => {
+    const name = el.querySelector("#dName").value.trim();
+    if (!name) { alert("Give the dish a name."); return; }
+    const ingredients = parseIngredients(el.querySelector("#dIng").value);
+    const type = el.querySelector("#dType").value;
+    const weekend = el.querySelector("#dWeekend").checked;
+    if (editingId) { Object.assign(dishById(editingId), { name, ingredients, type, weekend }); editingId = null; }
+    else state.dishes.push({ id: uid(), name, ingredients, type, weekend });
+    save(); render();
+  };
+  const c = el.querySelector("#cancelEdit"); if (c) c.onclick = () => { editingId = null; render(); };
+  el.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => { editingId = b.dataset.edit; render(); window.scrollTo(0,0); });
+  el.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+    const d = dishById(b.dataset.del);
+    if (!confirm(`Delete “${d.name}”?`)) return;
+    state.dishes = state.dishes.filter(x => x.id !== d.id);
+    Object.keys(state.week).forEach(k => { if (state.week[k].dishId === d.id) delete state.week[k]; });
+    save(); render();
+  });
+  el.querySelector("#saveSync").onclick = () => {
+    try { localStorage.setItem(SYNC_KEY, el.querySelector("#syncUrl").value.trim()); } catch (e) {}
+    pull(true);
+  };
+  el.querySelector("#exp").onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "food-plan-backup.json"; a.click();
+  };
+  el.querySelector("#imp").onclick = () => el.querySelector("#impFile").click();
+  el.querySelector("#impFile").onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        if (!Array.isArray(data.dishes)) throw new Error();
+        if (!confirm("Replace current data with the imported file?")) return;
+        state = Object.assign({week:{}, checked:{}}, data); ensureSettings(); save(); render();
+      } catch (err) { alert("That file doesn't look like a valid backup."); }
+    };
+    r.readAsText(f);
+  };
+}
+
+/* ---------- Render: Shopping list ---------- */
+function shoppingItems() {
+  const map = new Map(); // key -> {label, count}
+  DAYS.forEach((_, i) => {
+    const w = state.week[i]; const d = w && w.dishId ? dishById(w.dishId) : null;
+    if (!d) return;
+    d.ingredients.forEach(ing => {
+      const key = ing.toLowerCase();
+      if (map.has(key)) map.get(key).count++;
+      else map.set(key, { label: ing, count: 1 });
+    });
+  });
+  return [...map.entries()].map(([key, v]) => ({ key, ...v })).sort((a,b) => a.label.localeCompare(b.label));
+}
+function renderShop() {
+  const items = shoppingItems();
+  let html = `<div class="row" style="margin-bottom:14px">
+    <button class="btn secondary" id="copy">📋 Copy list</button>
+    <button class="btn secondary" id="uncheck">Uncheck all</button>
+  </div>`;
+  if (!items.length) html += `<p class="muted">Nothing to buy yet — generate a week first.</p>`;
+  else html += `<div class="card"><ul class="shop">${items.map(it => `<li class="${state.checked[it.key]?"done":""}">
+      <input type="checkbox" data-k="${esc(it.key)}" ${state.checked[it.key]?"checked":""}>
+      <span>${esc(it.label)} ${it.count>1?`<span class="count">(used in ${it.count} dishes)</span>`:""}</span></li>`).join("")}</ul></div>`;
+  const el = document.getElementById("tab-shop");
+  el.innerHTML = html;
+  el.querySelectorAll("input[data-k]").forEach(cb => cb.onchange = () => {
+    state.checked[cb.dataset.k] = cb.checked; save(); renderShop();
+  });
+  el.querySelector("#uncheck").onclick = () => { state.checked = {}; save(); renderShop(); };
+  el.querySelector("#copy").onclick = async () => {
+    const text = items.map(i => "• " + i.label).join("\n");
+    try { await navigator.clipboard.writeText(text); alert("Copied!"); } catch (e) { prompt("Copy this:", text); }
+  };
+}
+
+function render() {
+  renderWeek(); renderDishes(); renderShop();
+}
+
+/* ---------- Shared sync (Firebase Realtime Database, REST) ---------- */
+// Optional: paste your database URL here so every device that opens the page is connected automatically.
+const DEFAULT_SYNC_URL = "";
+const SYNC_KEY = "familyFoodPlan.syncUrl";
+
+function syncUrl() {
+  let u = "";
+  try { u = localStorage.getItem(SYNC_KEY) || ""; } catch (e) {}
+  return (u || DEFAULT_SYNC_URL).trim().replace(/\.json$/, "").replace(/\/+$/, "");
+}
+function endpoint() { const u = syncUrl(); return u ? u + "/familyplan.json" : ""; }
+function setStatus(t) { const el = document.getElementById("syncStatus"); if (el) el.textContent = t; }
+function clock() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+
+function toRemote() {
+  return {
+    dishes: state.dishes.map(d => ({ id: d.id, name: d.name, ingredients: d.ingredients, type: d.type || "other", weekend: !!d.weekend })),
+    week: DAYS.map((_, i) => state.week[i] ? { dishId: state.week[i].dishId || "", locked: !!state.week[i].locked } : { dishId: "", locked: false }),
+    checked: Object.keys(state.checked).filter(k => state.checked[k]),
+    settings: state.settings,
+    updatedAt: state.updatedAt
+  };
+}
+function fromRemote(r) {
+  const list = v => Array.isArray(v) ? v : Object.values(v || {});
+  const dishes = list(r.dishes).filter(Boolean).map(d => ({ id: d.id, name: d.name, ingredients: list(d.ingredients), type: d.type || "other", weekend: !!d.weekend }));
+  const wk = r.week || {}; const week = {};
+  DAYS.forEach((_, i) => { const w = wk[i]; if (w && w.dishId) week[i] = { dishId: w.dishId, locked: !!w.locked }; });
+  const checked = {}; list(r.checked).forEach(k => checked[k] = true);
+  const rs = r.settings || {};
+  const settings = Object.assign(defaultSettings(), rs, { excluded: list(rs.excluded) });
+  return { dishes, week, checked, settings, updatedAt: r.updatedAt || 0 };
+}
+
+let pushTimer = null;
+function schedulePush() {
+  if (!endpoint()) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(push, 300);
+}
+async function push() {
+  const url = endpoint(); if (!url) return;
+  try {
+    const r = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toRemote()) });
+    if (!r.ok) throw new Error(r.status);
+    setStatus("✓ Synced " + clock());
+  } catch (e) { setStatus("⚠ Can't reach database"); }
+}
+async function pull(force) {
+  const url = endpoint();
+  if (!url) { setStatus("Local only"); return; }
+  const a = document.activeElement;
+  if (!force && a && (a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && a.type === "text"))) return; // don't wipe what is being typed
+  try {
+    const r = await fetch(url + "?t=" + Date.now());
+    if (!r.ok) throw new Error(r.status);
+    const remote = await r.json();
+    if (!remote) { await push(); return; }
+    const ru = remote.updatedAt || 0;
+    if (ru > state.updatedAt) {
+      state = fromRemote(remote);
+      if (editingId && !dishById(editingId)) editingId = null;
+      persistLocal(); render();
+      setStatus("✓ Synced " + clock());
+    } else if (ru < state.updatedAt) {
+      await push();
+    } else {
+      setStatus("✓ Synced " + clock());
+    }
+  } catch (e) { setStatus("⚠ Can't reach database"); }
+}
+
+render();
+pull(true);
+setInterval(() => pull(false), 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(false); });
+</script>
+</body>
+</html>
