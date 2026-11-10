@@ -39,6 +39,7 @@
   ul.shop input { width:20px; height:20px; }
   .count { color:var(--muted); font-size:.85rem; }
   .hidden { display:none; }
+  code { background:#f1ece3; padding:1px 5px; border-radius:4px; font-size:.85em; }
   .chk { display:flex; align-items:center; gap:8px; color:var(--ink); font-size:1rem; margin-top:10px; cursor:pointer; }
   details.card summary { list-style:revert; }
   @media (max-width:520px){ .day .name{width:100%;} }
@@ -68,15 +69,26 @@ function ensureSettings() {
   const s = Object.assign(defaultSettings(), state.settings || {});
   if (!Array.isArray(s.excluded)) s.excluded = [];
   state.settings = s;
+  if (!Array.isArray(state.pantry)) state.pantry = [];
 }
 
 const SEED = {
   dishes: [
-    { id: "d1", name: "Tacos", type: "beef", weekend: true, ingredients: ["taco shells","minced meat","taco spice","lettuce","tomato","cheese","sour cream"] },
-    { id: "d2", name: "Spaghetti bolognese", type: "beef", weekend: false, ingredients: ["spaghetti","minced meat","tomato sauce","onion","carrot"] },
-    { id: "d3", name: "Fish cakes with potatoes", type: "fish", weekend: false, ingredients: ["fish cakes","potatoes","carrot","onion sauce"] },
-    { id: "d4", name: "Chicken curry with rice", type: "chicken", weekend: false, ingredients: ["chicken","curry paste","coconut milk","rice","onion"] },
-    { id: "d5", name: "Pizza", type: "other", weekend: true, ingredients: ["pizza dough","tomato sauce","cheese","ham","bell pepper"] }
+    {"id": "d1", "name": "Salmon with rice", "type": "fish", "weekend": false, "ingredients": ["laksefilet", "ris", "brokkoli", "soyasaus", "sitron"]},
+    {"id": "d2", "name": "Chicken with estragon", "type": "chicken", "weekend": false, "ingredients": ["kyllingfilet", "estragon", "matfløte", "løk", "ris"]},
+    {"id": "d3", "name": "Indian curry", "type": "chicken", "weekend": false, "ingredients": ["kyllingfilet", "indisk karripasta", "kokosmelk", "hermetiske tomater", "løk", "hvitløk", "ris", "naanbrød"]},
+    {"id": "d4", "name": "Pizza", "type": "other", "weekend": false, "ingredients": ["pizzabunner", "pizzasaus", "revet ost", "skinke", "pepperoni", "paprika", "champignon"]},
+    {"id": "d5", "name": "Taco", "type": "beef", "weekend": false, "ingredients": ["tacoskjell", "kjøttdeig", "tacokrydder", "tacosaus", "salat", "tomat", "agurk", "mais", "rømme", "revet ost"]},
+    {"id": "d6", "name": "Thai red curry with beans", "type": "veg", "weekend": false, "ingredients": ["rød karripasta", "kokosmelk", "kidneybønner", "paprika", "brokkoli", "løk", "ris", "lime"]},
+    {"id": "d7", "name": "Lasagna", "type": "beef", "weekend": false, "ingredients": ["lasagneplater", "kjøttdeig", "hermetiske tomater", "tomatpuré", "løk", "hvitløk", "melk", "smør", "hvetemel", "revet ost"]},
+    {"id": "d8", "name": "Pork chops", "type": "pork", "weekend": false, "ingredients": ["svinekoteletter", "poteter", "brokkoli", "gulrot", "smør"]},
+    {"id": "d9", "name": "Wok", "type": "other", "weekend": false, "ingredients": ["nudler", "wokgrønnsaker", "soyasaus", "hvitløk", "ingefær", "kyllingstrimler"]},
+    {"id": "d10", "name": "Steak", "type": "beef", "weekend": true, "ingredients": ["biff (entrecôte eller indrefilet)", "poteter", "bearnaisesaus", "grønne bønner", "smør"]},
+    {"id": "d11", "name": "Seasonal weekend meal", "type": "other", "weekend": true, "ingredients": ["(rediger: kjøtt til sesongmiddag, f.eks. lam, fårikål, pinnekjøtt)"]},
+    {"id": "d12", "name": "Kjøttkaker", "type": "beef", "weekend": false, "ingredients": ["kjøttkaker (kjøttdeig eller ferdige)", "poteter", "brun saus", "gulrot", "tyttebærsyltetøy"]},
+    {"id": "d13", "name": "Pitabread", "type": "other", "weekend": false, "ingredients": ["pitabrød", "kyllingstrimler", "salat", "tomat", "agurk", "rødløk", "hvitløksdressing", "fetaost"]},
+    {"id": "d14", "name": "Pasta with minced meat and dried tomato", "type": "beef", "weekend": false, "ingredients": ["pasta", "kjøttdeig", "soltørkede tomater", "løk", "hvitløk", "matfløte", "parmesan"]},
+    {"id": "d15", "name": "Tuna pesto pasta", "type": "fish", "weekend": false, "ingredients": ["pasta", "tunfisk på boks", "grønn pesto", "cherrytomater", "parmesan"]}
   ],
   week: {},   // { "0": {dishId, locked}, ... }
   checked: {} // shopping list ticks
@@ -274,6 +286,70 @@ function renderWeek() {
   });
 }
 
+/* ---------- Quick add (paste many dishes) ---------- */
+let quickMsg = "";
+let quickDraft = "";
+const TYPE_ALIASES = {
+  chicken:"chicken", kylling:"chicken",
+  beef:"beef", kjøtt:"beef", storfe:"beef", minced:"beef", kjøttdeig:"beef",
+  pork:"pork", svin:"pork", svinekjøtt:"pork",
+  fish:"fish", fisk:"fish", seafood:"fish", sjømat:"fish",
+  veg:"veg", vegetarian:"veg", vegetar:"veg", vegan:"veg", vegansk:"veg",
+  other:"other", annet:"other"
+};
+function parseType(t) {
+  const w = String(t).toLowerCase().replace(/[^\p{L} ]/gu, " ").trim().split(/\s+/)[0] || "";
+  return TYPE_ALIASES[w] || null;
+}
+// "Name | type | [weekend |] ingredient, ingredient"  (also copes with numbering, bullets and markdown tables)
+function parseDishLine(line) {
+  const parts = line.split("|").map(p => p.trim());
+  if (parts[0] === "") parts.shift();
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  if (parts.length < 2) return null;
+  const name = parts[0].replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, "").replace(/\*\*/g, "").trim();
+  if (!name) return null;
+  if (/^(name|dish|navn|rett)$/i.test(name)) return { skip: true };
+  let type = parseType(parts[1]), guessed = false;
+  if (!type) { type = "other"; guessed = true; }
+  let weekend = false, ingredients = [];
+  parts.slice(2).forEach(p => {
+    if (/^(weekend|helg|🎉)$/i.test(p)) weekend = true;
+    else ingredients = ingredients.concat(parseIngredients(p));
+  });
+  return { name, type, weekend, ingredients, guessed };
+}
+function addDishesFromText(text) {
+  let added = 0, updated = 0; const bad = [], guessed = [];
+  text.split("\n").map(l => l.trim()).filter(Boolean).forEach(line => {
+    if (/^[\s|:\-]+$/.test(line)) return; // markdown table separator
+    const d = parseDishLine(line);
+    if (d && d.skip) return;
+    if (!d) { bad.push(line); return; }
+    if (d.guessed) guessed.push(d.name);
+    const ex = state.dishes.find(x => x.name.toLowerCase() === d.name.toLowerCase());
+    if (ex) { ex.type = d.type; ex.weekend = d.weekend; if (d.ingredients.length) ex.ingredients = d.ingredients; updated++; }
+    else { state.dishes.push({ id: uid(), name: d.name, type: d.type, weekend: d.weekend, ingredients: d.ingredients }); added++; }
+  });
+  if (added || updated) save();
+  let msg = (added || updated) ? `Added ${added}, updated ${updated}.` : "Nothing was added.";
+  if (guessed.length) msg += ` Unknown type for ${guessed.join(", ")}, so set to "other".`;
+  if (bad.length) msg += ` Couldn't read ${bad.length} line${bad.length === 1 ? "" : "s"} (left in the box). Format: Name | type | ingredients.`;
+  return { msg, leftover: bad.join("\n") };
+}
+function aiPrompt() {
+  const pantry = state.pantry.length ? `\nDo not include things we always have at home: ${state.pantry.join(", ")}.` : "";
+  return `Write dinner dishes for a Norwegian family, one dish per line, in exactly this format and nothing else (no intro, no numbering, no table):
+Name | type | ingredient, ingredient, ingredient
+Allowed types: chicken, beef, pork, fish, veg, other. For weekend-only dishes add the word weekend as an extra field: Name | type | weekend | ingredients
+Ingredients must be what you buy in a Norwegian grocery store, written in Norwegian (e.g. kjøttdeig, tacoskjell, rømme), without amounts.${pantry}
+Example:
+Burger | beef | hamburgerbrød, kjøttdeig, skivet ost, salat, tomat, hamburgerdressing
+Ribbe | pork | weekend | svinebuk, rødkål, poteter, brun saus
+
+Dishes I want: `;
+}
+
 /* ---------- Render: Dishes ---------- */
 let editingId = null;
 function renderDishes() {
@@ -291,6 +367,13 @@ function renderDishes() {
       <button class="btn" id="saveDish">${ed ? "Save changes" : "Add dish"}</button>
       ${ed ? `<button class="btn secondary" id="cancelEdit">Cancel</button>` : ""}
     </div>
+  </div>
+  <div class="card">
+    <strong>⚡ Quick add many dishes</strong>
+    <p class="muted" style="margin:6px 0">One dish per line: <code>Name | type | ingredient, ingredient</code>. Add <code>weekend</code> as an extra field for weekend dishes. Types: chicken, beef, pork, fish, veg, other. Same name = updates that dish.</p>
+    <textarea id="quickText" style="min-height:110px" placeholder="Burger | beef | hamburgerbrød, kjøttdeig, skivet ost, salat, tomat&#10;Fiskesuppe | fish | fiskekjøtt, fløte, gulrot, purre&#10;Ribbe | pork | weekend | svinebuk, rødkål, poteter">${esc(quickDraft)}</textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" id="quickAdd">Add dishes</button><button class="btn secondary" id="quickPrompt">📋 Copy AI prompt</button></div>
+    ${quickMsg ? `<p style="margin:10px 0 0">${esc(quickMsg)}</p>` : ""}
   </div>
   <h3>All dishes (${state.dishes.length})</h3>`;
   if (!state.dishes.length) html += `<p class="muted">No dishes yet.</p>`;
@@ -337,6 +420,16 @@ function renderDishes() {
     Object.keys(state.week).forEach(k => { if (state.week[k].dishId === d.id) delete state.week[k]; });
     save(); render();
   });
+  el.querySelector("#quickText").oninput = e => { quickDraft = e.target.value; };
+  el.querySelector("#quickAdd").onclick = () => {
+    const r = addDishesFromText(el.querySelector("#quickText").value);
+    quickMsg = r.msg; quickDraft = r.leftover; render();
+  };
+  el.querySelector("#quickPrompt").onclick = async () => {
+    const t = aiPrompt();
+    try { await navigator.clipboard.writeText(t); quickMsg = "AI prompt copied. Paste it into any AI chat, add which dishes you want at the end, then paste the answer in the box above."; render(); }
+    catch (e) { prompt("Copy this:", t); }
+  };
   el.querySelector("#saveSync").onclick = () => {
     try { localStorage.setItem(SYNC_KEY, el.querySelector("#syncUrl").value.trim()); } catch (e) {}
     pull(true);
@@ -362,38 +455,87 @@ function renderDishes() {
 }
 
 /* ---------- Render: Shopping list ---------- */
+let shopMode = "week";        // "week" = this week's plan, "pick" = hand-picked dishes
+const shopPick = new Set();   // dish ids picked in "pick" mode
+let pantryOpen = false;
+const ikey = s => String(s).toLowerCase().trim();
+
+function shopDishes() {
+  if (shopMode === "pick") return state.dishes.filter(d => shopPick.has(d.id));
+  return DAYS.map((_, i) => { const w = state.week[i]; return w && w.dishId ? dishById(w.dishId) : null; }).filter(Boolean);
+}
 function shoppingItems() {
-  const map = new Map(); // key -> {label, count}
-  DAYS.forEach((_, i) => {
-    const w = state.week[i]; const d = w && w.dishId ? dishById(w.dishId) : null;
-    if (!d) return;
-    d.ingredients.forEach(ing => {
-      const key = ing.toLowerCase();
-      if (map.has(key)) map.get(key).count++;
-      else map.set(key, { label: ing, count: 1 });
-    });
-  });
-  return [...map.entries()].map(([key, v]) => ({ key, ...v })).sort((a,b) => a.label.localeCompare(b.label));
+  const pantry = new Set(state.pantry.map(ikey));
+  const map = new Map(), hidden = new Map();
+  shopDishes().forEach(d => d.ingredients.forEach(ing => {
+    const key = ikey(ing);
+    const target = pantry.has(key) ? hidden : map;
+    if (target.has(key)) target.get(key).count++; else target.set(key, { label: ing, count: 1 });
+  }));
+  const toArr = m => [...m.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => a.label.localeCompare(b.label));
+  return { items: toArr(map), hidden: toArr(hidden) };
 }
 function renderShop() {
-  const items = shoppingItems();
-  let html = `<div class="row" style="margin-bottom:14px">
+  const { items, hidden } = shoppingItems();
+  const sorted = state.dishes.slice().sort((a, b) => a.name.localeCompare(b.name));
+  let html = `<div class="row" style="margin-bottom:12px">
+    <button class="btn ${shopMode === "week" ? "" : "secondary"}" data-mode="week">This week's plan</button>
+    <button class="btn ${shopMode === "pick" ? "" : "secondary"}" data-mode="pick">Pick dishes</button>
+  </div>`;
+  if (shopMode === "pick") {
+    html += `<div class="card">
+      <div class="row"><strong class="grow">Tick the dishes to shop for</strong>
+        <button class="btn secondary small" id="pickWeek">Use this week's</button>
+        <button class="btn secondary small" id="pickClear">Clear</button></div>
+      ${sorted.map(d => `<label class="chk" style="margin:8px 0 0"><input type="checkbox" data-spick="${d.id}" ${shopPick.has(d.id) ? "checked" : ""}> ${typeEmoji(d)} ${esc(d.name)}</label>`).join("") || `<p class="muted">No dishes yet.</p>`}
+    </div>`;
+  }
+  html += `<div class="row" style="margin-bottom:12px">
     <button class="btn secondary" id="copy">📋 Copy list</button>
     <button class="btn secondary" id="uncheck">Uncheck all</button>
   </div>`;
-  if (!items.length) html += `<p class="muted">Nothing to buy yet — generate a week first.</p>`;
-  else html += `<div class="card"><ul class="shop">${items.map(it => `<li class="${state.checked[it.key]?"done":""}">
-      <input type="checkbox" data-k="${esc(it.key)}" ${state.checked[it.key]?"checked":""}>
-      <span>${esc(it.label)} ${it.count>1?`<span class="count">(used in ${it.count} dishes)</span>`:""}</span></li>`).join("")}</ul></div>`;
+  if (!items.length) html += `<p class="muted">${shopMode === "pick" ? "Tick one or more dishes above." : "Nothing to buy yet. Generate a week first."}${hidden.length ? " Everything on it is marked as always at home." : ""}</p>`;
+  else html += `<div class="card"><ul class="shop">${items.map(it => `<li class="${state.checked[it.key] ? "done" : ""}">
+      <input type="checkbox" data-k="${esc(it.key)}" ${state.checked[it.key] ? "checked" : ""}>
+      <span class="grow">${esc(it.label)} ${it.count > 1 ? `<span class="count">(used in ${it.count} dishes)</span>` : ""}</span>
+      <button class="btn secondary small" data-home="${esc(it.key)}" title="We always have this at home, hide it">🏠</button></li>`).join("")}</ul></div>`;
+  html += `<details class="card" id="pantryBox" ${pantryOpen ? "open" : ""}>
+    <summary style="cursor:pointer;font-weight:600">🏠 Always at home (${state.pantry.length})${hidden.length ? ` · ${hidden.length} hidden from this list` : ""}</summary>
+    <p class="muted" style="margin:10px 0 4px">Tap 🏠 next to an item to hide it from shopping lists. Items here are never added to the list.</p>
+    ${hidden.length ? `<div class="chips" style="margin-bottom:6px">${hidden.map(h => `<button class="chip" style="border:none;cursor:pointer;font:inherit;font-size:.8rem" data-unhome="${esc(h.key)}" title="Tap to show it in the list again">${esc(h.label)} ✕</button>`).join("")}</div>` : ""}
+    <label>Edit the whole list (one per line or comma separated)</label>
+    <textarea id="pantryText">${esc(state.pantry.join("\n"))}</textarea>
+    <div class="row" style="margin-top:8px"><button class="btn small" id="pantrySave">Save list</button></div>
+  </details>`;
   const el = document.getElementById("tab-shop");
   el.innerHTML = html;
-  el.querySelectorAll("input[data-k]").forEach(cb => cb.onchange = () => {
-    state.checked[cb.dataset.k] = cb.checked; save(); renderShop();
+  el.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { shopMode = b.dataset.mode; renderShop(); });
+  el.querySelectorAll("[data-spick]").forEach(cb => cb.onchange = () => { if (cb.checked) shopPick.add(cb.dataset.spick); else shopPick.delete(cb.dataset.spick); renderShop(); });
+  const pw = el.querySelector("#pickWeek");
+  if (pw) pw.onclick = () => { shopPick.clear(); DAYS.forEach((_, i) => { const w = state.week[i]; if (w && w.dishId) shopPick.add(w.dishId); }); renderShop(); };
+  const pc = el.querySelector("#pickClear");
+  if (pc) pc.onclick = () => { shopPick.clear(); renderShop(); };
+  el.querySelectorAll("input[data-k]").forEach(cb => cb.onchange = () => { state.checked[cb.dataset.k] = cb.checked; save(); renderShop(); });
+  el.querySelectorAll("[data-home]").forEach(b => b.onclick = () => {
+    const k = b.dataset.home;
+    if (!state.pantry.map(ikey).includes(k)) state.pantry.push(k);
+    save(); renderShop();
+  });
+  el.querySelectorAll("[data-unhome]").forEach(b => b.onclick = () => {
+    state.pantry = state.pantry.filter(p => ikey(p) !== b.dataset.unhome);
+    save(); renderShop();
   });
   el.querySelector("#uncheck").onclick = () => { state.checked = {}; save(); renderShop(); };
   el.querySelector("#copy").onclick = async () => {
     const text = items.map(i => "• " + i.label).join("\n");
     try { await navigator.clipboard.writeText(text); alert("Copied!"); } catch (e) { prompt("Copy this:", text); }
+  };
+  const pb = el.querySelector("#pantryBox");
+  pb.addEventListener("toggle", () => { pantryOpen = pb.open; });
+  el.querySelector("#pantrySave").onclick = () => {
+    const seen = new Set();
+    state.pantry = parseIngredients(el.querySelector("#pantryText").value).map(ikey).filter(k => !seen.has(k) && seen.add(k));
+    save(); renderShop();
   };
 }
 
@@ -421,6 +563,7 @@ function toRemote() {
     week: DAYS.map((_, i) => state.week[i] ? { dishId: state.week[i].dishId || "", locked: !!state.week[i].locked } : { dishId: "", locked: false }),
     checked: Object.keys(state.checked).filter(k => state.checked[k]),
     settings: state.settings,
+    pantry: state.pantry,
     updatedAt: state.updatedAt
   };
 }
@@ -432,7 +575,7 @@ function fromRemote(r) {
   const checked = {}; list(r.checked).forEach(k => checked[k] = true);
   const rs = r.settings || {};
   const settings = Object.assign(defaultSettings(), rs, { excluded: list(rs.excluded) });
-  return { dishes, week, checked, settings, updatedAt: r.updatedAt || 0 };
+  return { dishes, week, checked, settings, pantry: list(r.pantry).map(String), updatedAt: r.updatedAt || 0 };
 }
 
 let pushTimer = null;
