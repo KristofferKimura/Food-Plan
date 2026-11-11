@@ -839,7 +839,7 @@ function renderHaruki() {
 function render() { renderWeek(); renderDishes(); renderShop(); renderHaruki(); }
 
 /* ---------- Shared sync (Firebase Realtime Database, REST) ---------- */
-const DEFAULT_SYNC_URL = "";
+const DEFAULT_SYNC_URL = "https://kimurafoodplan-default-rtdb.europe-west1.firebasedatabase.app";
 const SYNC_KEY = "familyFoodPlan.syncUrl";
 let blocked = false;   // true when the database holds data from a newer version of this page
 
