@@ -14,7 +14,8 @@
   .top { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 0 8px; }
   h1 { margin:0; font-size:1.25rem; letter-spacing:-.01em; }
   h3 { margin:22px 0 10px; font-size:1rem; color:var(--muted); font-weight:600; }
-  #syncStatus { font-size:.75rem; color:var(--muted); margin-left:8px; font-weight:400; }
+  #syncStatus { display:block; font-size:.75rem; color:var(--muted); margin-top:2px; font-weight:400; letter-spacing:0; }
+  #undoBtn { white-space:nowrap; flex:none; }
   nav { display:flex; gap:4px; overflow-x:auto; padding-bottom:10px; scrollbar-width:none; }
   nav::-webkit-scrollbar { display:none; }
   nav button { flex:1 0 auto; background:transparent; border:1px solid transparent; color:var(--muted); padding:8px 14px; border-radius:999px; font:inherit; font-size:.95rem; cursor:pointer; white-space:nowrap; }
@@ -40,7 +41,7 @@
   details.card summary { list-style:revert; cursor:pointer; font-weight:600; }
 
   /* Week */
-  .day { display:grid; grid-template-columns:auto 1fr auto; gap:8px 10px; align-items:center; }
+  .day { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px 10px; align-items:center; }
   .day.locked { border-color:var(--accent); }
   .day.made { border-left:4px solid var(--ok); }
   .day.over { outline:2px dashed var(--accent); outline-offset:2px; }
@@ -52,8 +53,10 @@
   .dish strong { display:block; font-size:1.05rem; }
   .dish small { color:var(--muted); }
   .day.made .dish strong { color:var(--muted); }
-  .ctrl { display:flex; gap:6px; align-items:center; }
-  .ctrl select { width:auto; max-width:180px; padding:7px 10px; font-size:.9rem; }
+  .dish { min-width:0; overflow-wrap:anywhere; }
+  .acts { display:flex; gap:6px; align-items:center; }
+  .pickrow { grid-column:1 / -1; }
+  .pickrow select { width:100%; min-width:0; padding:8px 10px; font-size:.9rem; }
   .cookrow { grid-column:1 / -1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:8px; border-top:1px dashed var(--line); }
   .cookrow .chk { margin:0; font-size:.95rem; }
   .pill { font:inherit; font-size:.85rem; border:1px solid var(--line); background:var(--surface2); color:var(--muted); border-radius:999px; padding:4px 12px; cursor:pointer; }
@@ -88,7 +91,14 @@
   .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(20px + env(safe-area-inset-bottom)); background:var(--surface2); border:1px solid var(--line); box-shadow:0 8px 30px rgba(0,0,0,.5); border-radius:12px; padding:10px 14px; display:flex; gap:14px; align-items:center; z-index:20; max-width:92vw; }
   .toast button { background:none; border:none; color:var(--accent); font:inherit; font-weight:700; cursor:pointer; }
 
-  @media (max-width:600px){ .ctrl { grid-column:1 / -1; } .ctrl select { flex:1; max-width:none; } main { padding:14px; } }
+  .bar { height:8px; background:var(--surface2); border-radius:999px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .2s; }
+  ul.shop .lbl { min-width:0; overflow-wrap:anywhere; }
+  ul.shop .cedit { min-width:0; padding:7px 9px; }
+  details.card .card { background:var(--surface2); margin:10px 0 0; }
+  .card.tried { opacity:.7; }
+  @media (max-width:600px){ main { padding:14px; } nav button { padding:8px 11px; font-size:.9rem; } }
+  @media (max-width:380px){ nav button { padding:8px 8px; font-size:.85rem; } }
 </style>
 </head>
 <body>
@@ -101,8 +111,9 @@
     <nav>
       <button data-tab="week" class="active">Week</button>
       <button data-tab="dishes">Dishes</button>
-      <button data-tab="shop">Shopping</button>
+      <button data-tab="shop">Shop</button>
       <button data-tab="haruki">Haruki</button>
+      <button data-tab="clean">Clean</button>
     </nav>
   </div>
 </header>
@@ -111,18 +122,34 @@
   <section id="tab-dishes" class="hidden"></section>
   <section id="tab-shop" class="hidden"></section>
   <section id="tab-haruki" class="hidden"></section>
+  <section id="tab-clean" class="hidden"></section>
 </main>
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
 
 <script>
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const KEY = "familyFoodPlan.v1";   // same key as before, so data already on a device is kept
-const DATA_V = 2;                   // bump when the saved data shape changes
+const DATA_V = 4;                   // bump when the saved data shape changes
 const DAY_MS = 864e5;
 const HISTORY_DAYS = 28;            // "made" history is kept for 4 weeks
 const RECENT_DAYS = 7;              // generator avoids dishes made in the last week
 const TYPES = [["chicken","🍗 Chicken"],["beef","🥩 Beef / minced meat"],["pork","🐖 Pork"],["fish","🐟 Fish / seafood"],["veg","🥦 Vegetarian"],["other","🍝 Other"]];
 const COOKS = { mom: "👩 Mom", dad: "👨 Dad" };
+const ROOMS = [["all","🏠 All rooms"],["office","💼 Office"],["haruki","👶 Haruki's room"],["master","🛏️ Master bedroom"],["kitchen","🍳 Kitchen & living room"],["bath","🛁 Bathroom & toilet"]];
+const CLEAN_DEFAULTS = [
+  ["all", ["Vacuum all rooms","Wash floors in all rooms","Empty all bins","Wipe door handles & light switches","Open windows to air out","Clear clutter off floors & surfaces"]],
+  ["office", ["Tidy desk & put papers away","Dust surfaces & screens","Hide cables & loose items"]],
+  ["haruki", ["Tidy away toys & baby things","Make the cot / bed","Tidy the changing area","Dust surfaces"]],
+  ["master", ["Make the bed","Clear floor & bedside tables","Dust surfaces","Tidy wardrobe & put clothes away"]],
+  ["kitchen", ["Clear & wipe counters","Wash up & empty the dishwasher","Wipe stove top & sink","Wipe fridge front & appliances","Wipe dining table","Tidy sofa & cushions","Dust surfaces & TV"]],
+  ["bath", ["Clean toilet bowl & seat","Clean sink, tap & mirror","Clean shower / bath","Hang fresh towels","Put products away"]]
+];
+// fixed ids, so two devices that seed the list separately still agree on it
+function defaultCleaning() {
+  const out = [];
+  CLEAN_DEFAULTS.forEach(([room, tasks]) => tasks.forEach((text, i) => out.push({ id: "c_" + room + "_" + i, room, text, done: false, who: "" })));
+  return out;
+}
 const $ = id => document.getElementById(id);
 
 function defaultSettings() { return { maxType: 2, minFish: 1, weekend: true, excluded: [] }; }
@@ -134,6 +161,8 @@ function ensureState() {
   if (!Array.isArray(state.pantry)) state.pantry = [];
   if (!Array.isArray(state.extras)) state.extras = [];
   if (!Array.isArray(state.history)) state.history = [];
+  if (!Array.isArray(state.haruki)) state.haruki = [];
+  if (!Array.isArray(state.cleaning)) state.cleaning = defaultCleaning();
   if (!state.groupOverride || typeof state.groupOverride !== "object") state.groupOverride = {};
   if (!state.checked || typeof state.checked !== "object") state.checked = {};
   if (!state.week || typeof state.week !== "object") state.week = {};
@@ -209,7 +238,7 @@ function undo() {
 }
 
 /* ---------- Tabs ---------- */
-const TABS = ["week","dishes","shop","haruki"];
+const TABS = ["week","dishes","shop","haruki","clean"];
 document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
 function showTab(name) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
@@ -267,6 +296,7 @@ function candidates(i, week, typeCount, used, rules) {
   const isWeekend = i >= 5;
   return state.dishes.filter(d => {
     const t = d.type || "other";
+    if (d.paused) return false;
     if (rules.excluded.includes(t)) return false;
     if (rules.avoidId === d.id) return false;
     if (rules.recent && rules.recent.has(d.id)) return false;
@@ -336,7 +366,7 @@ function generateWeek() {
     if (!fresh && w && (w.locked || w.done) && w.dishId && dishById(w.dishId)) base[i] = Object.assign({}, w); else free.push(i);
   });
   const res = build(base, free);
-  if (!res.week) { alert("No dishes match your filters. Check “Include food types”."); return; }
+  if (!res.week) { alert("No dishes match your filters. Check “Include food types” and your paused dishes."); return; }
   snap(fresh ? "New week generated" : "Week generated");
   state.week = res.week;
   genNote = relaxNote(res.relaxed);
@@ -403,18 +433,24 @@ function bindDrag(root) {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       e.preventDefault();
       const from = +h.dataset.drag, card = h.closest(".day");
-      let over = null;
+      let over = null, lastX = e.clientX, lastY = e.clientY;
       card.classList.add("dragging"); document.body.classList.add("dragging-now");
       try { h.setPointerCapture(e.pointerId); } catch (_) {}
       const clear = () => root.querySelectorAll(".day.over").forEach(x => x.classList.remove("over"));
-      const move = ev => {
-        const t = document.elementFromPoint(ev.clientX, ev.clientY);
+      const hit = () => {
+        const t = document.elementFromPoint(lastX, lastY);
         const c = t && t.closest ? t.closest("[data-day]") : null;
         clear(); over = null;
         if (c && +c.dataset.day !== from) { c.classList.add("over"); over = +c.dataset.day; }
-        if (ev.clientY < 80) window.scrollBy(0, -14); else if (ev.clientY > window.innerHeight - 80) window.scrollBy(0, 14);
       };
+      const move = ev => { lastX = ev.clientX; lastY = ev.clientY; hit(); };
+      // keep scrolling while the finger rests near the top or bottom edge, even without moving
+      const timer = setInterval(() => {
+        if (lastY < 130) { window.scrollBy(0, -12); hit(); }
+        else if (lastY > window.innerHeight - 100) { window.scrollBy(0, 12); hit(); }
+      }, 16);
       const end = ev => {
+        clearInterval(timer);
         h.removeEventListener("pointermove", move); h.removeEventListener("pointerup", end); h.removeEventListener("pointercancel", end);
         clear(); card.classList.remove("dragging"); document.body.classList.remove("dragging-now");
         if (ev.type === "pointerup" && over !== null) swapDays(from, over);
@@ -448,7 +484,7 @@ function renderWeek() {
   DAYS.forEach((day, i) => {
     const w = state.week[i] || {};
     const d = w.dishId ? dishById(w.dishId) : null;
-    const opts = `<option value="">— none —</option>` + sortedDishes.map(x => `<option value="${x.id}" ${x.id === w.dishId ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+    const opts = `<option value="">— none —</option>` + sortedDishes.map(x => `<option value="${x.id}" ${x.id === w.dishId ? "selected" : ""}>${esc(x.name)}${x.paused ? " (paused)" : ""}</option>`).join("");
     const cookRow = d ? `<div class="cookrow">
         <label class="chk"><input type="checkbox" data-made="${i}" ${w.done ? "checked" : ""}> Made</label>
         ${w.done ? `<span class="muted" style="font-size:.85rem">Cooked by</span>
@@ -458,11 +494,11 @@ function renderWeek() {
     html += `<div class="card day ${w.locked ? "locked" : ""} ${w.done ? "made" : ""}" data-day="${i}">
       <div class="handle" data-drag="${i}" title="Drag to swap with another day">⠿</div>
       <div class="dish"><div class="dname">${day}</div>${d ? `<strong>${typeEmoji(d)} ${esc(d.name)}${d.weekend ? " 🎉" : ""}</strong><small>${d.ingredients.length} ingredient${d.ingredients.length === 1 ? "" : "s"}</small>` : `<span class="muted">Nothing planned</span>`}</div>
-      <div class="ctrl">
-        <select data-pick="${i}">${opts}</select>
+      <div class="acts">
         <button class="btn secondary small" data-reroll="${i}" title="New random dish">🎲</button>
         <button class="btn secondary small" data-lock="${i}" title="Keep this dish when generating">${w.locked ? "🔒" : "🔓"}</button>
       </div>
+      <div class="pickrow"><select data-pick="${i}" aria-label="Choose dish for ${day}">${opts}</select></div>
       ${cookRow}
     </div>`;
   });
@@ -560,6 +596,7 @@ Dishes I want: `;
 
 /* ---------- Render: Dishes ---------- */
 let editingId = null;
+let pausedOpen = false;
 function renderDishes() {
   const ed = editingId ? dishById(editingId) : null;
   let html = `<div class="card">
@@ -583,19 +620,32 @@ function renderDishes() {
     <div class="row" style="margin-top:8px"><button class="btn" id="quickAdd">Add dishes</button><button class="btn secondary" id="quickPrompt">📋 Copy AI prompt</button></div>
     ${quickMsg ? `<p style="margin:10px 0 0">${esc(quickMsg)}</p>` : ""}
   </div>
-  <h3>All dishes (${state.dishes.length})</h3>`;
-  if (!state.dishes.length) html += `<p class="muted">No dishes yet.</p>`;
-  state.dishes.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(d => {
+  <h3>All dishes (${state.dishes.filter(d => !d.paused).length})</h3>`;
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const dishCard = d => {
     const lm = lastMade(d.id);
     const n = state.history.filter(h => h.dishId === d.id).length;
-    html += `<div class="card">
-      <div class="row"><strong class="grow">${typeEmoji(d)} ${esc(d.name)}${d.weekend ? ` <span class="chip">🎉 Weekend</span>` : ""}</strong>
-        <button class="btn secondary small" data-edit="${d.id}">Edit</button>
-        <button class="btn secondary small" data-del="${d.id}">Delete</button></div>
+    return `<div class="card">
+      <strong>${typeEmoji(d)} ${esc(d.name)}${d.weekend ? ` <span class="chip">🎉 Weekend</span>` : ""}</strong>
       ${lm ? `<div class="muted" style="font-size:.8rem;margin-top:4px">Last made ${ago(lm)} · ${n}× in 4 weeks</div>` : ""}
       <div class="chips">${d.ingredients.map(i => `<span class="chip">${esc(i)}</span>`).join("") || `<span class="muted">No ingredients</span>`}</div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn secondary small" data-pause="${d.id}">${d.paused ? "▶️ Resume" : "⏸️ Pause"}</button>
+        <button class="btn secondary small" data-edit="${d.id}">Edit</button>
+        <button class="btn secondary small" data-del="${d.id}">Delete</button></div>
     </div>`;
-  });
+  };
+  const activeDishes = state.dishes.filter(d => !d.paused).sort(byName);
+  const pausedDishes = state.dishes.filter(d => d.paused).sort(byName);
+  if (!state.dishes.length) html += `<p class="muted">No dishes yet.</p>`;
+  else if (!activeDishes.length) html += `<p class="muted">All your dishes are paused.</p>`;
+  html += activeDishes.map(dishCard).join("");
+  html += `<details class="card" id="pausedBox" ${pausedOpen ? "open" : ""}>
+    <summary>⏸️ Paused dishes (${pausedDishes.length})</summary>
+    ${pausedDishes.length
+      ? `<p class="muted" style="margin:8px 0 0;font-size:.85rem">These are skipped when you generate a week. Tap Resume to bring one back.</p>` + pausedDishes.map(dishCard).join("")
+      : `<p class="muted" style="margin:8px 0 0;font-size:.85rem">Nothing paused. Tap ⏸️ Pause on a dish to park it here for a while.</p>`}
+  </details>`;
   html += `<h3>Backup & sharing</h3>
   <div class="card">
     <strong>Shared sync (you + partner)</strong>
@@ -624,6 +674,13 @@ function renderDishes() {
   };
   const c = el.querySelector("#cancelEdit"); if (c) c.onclick = () => { editingId = null; render(); };
   el.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => { editingId = b.dataset.edit; render(); window.scrollTo(0,0); });
+  const pbox = el.querySelector("#pausedBox");
+  pbox.addEventListener("toggle", () => { pausedOpen = pbox.open; });
+  el.querySelectorAll("[data-pause]").forEach(b => b.onclick = () => {
+    const d = dishById(b.dataset.pause); if (!d) return;
+    snap(d.paused ? "Dish resumed" : "Dish paused");
+    d.paused = !d.paused; save(); render();
+  });
   el.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
     const d = dishById(b.dataset.del);
     if (!confirm(`Delete “${d.name}”?`)) return;
@@ -829,14 +886,181 @@ function renderShop() {
   };
 }
 
-/* ---------- Render: Haruki ---------- */
+/* ---------- Render: Haruki (food ideas) ---------- */
+let harukiEditId = null, harukiMsg = "", harukiDraft = "";
+// "Name | details" (also copes with numbering, bullets, markdown tables; a line with no | is just a name)
+function parseIdeaLine(line) {
+  const parts = line.split("|").map(p => p.trim());
+  if (parts[0] === "") parts.shift();
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  if (!parts.length) return null;
+  const name = parts[0].replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, "").replace(/\*\*/g, "").trim();
+  if (!name) return null;
+  if (/^(name|idea|food|dish|navn|rett)$/i.test(name)) return { skip: true };
+  return { name, note: parts.slice(1).filter(Boolean).join(" — ") };
+}
+function addIdeasFromText(text) {
+  let added = 0, updated = 0;
+  text.split("\n").map(l => l.trim()).filter(Boolean).forEach(line => {
+    if (/^[\s|:\-]+$/.test(line)) return;
+    const d = parseIdeaLine(line);
+    if (!d || d.skip) return;
+    const ex = state.haruki.find(x => x.name.toLowerCase() === d.name.toLowerCase());
+    if (ex) { if (d.note) ex.note = d.note; updated++; }
+    else { state.haruki.push({ id: uid(), name: d.name, note: d.note, tried: false }); added++; }
+  });
+  if (added || updated) save();
+  return (added || updated) ? `Added ${added}, updated ${updated}.` : "Nothing was added.";
+}
+function ideaPrompt() {
+  return `Write food ideas for my baby, one idea per line, in exactly this format and nothing else (no intro, no numbering, no table):
+Name | details
+"details" is one or two short sentences about what it actually is: the main ingredients, the texture or how it is served (for example mashed, soft finger food, puree) and a quick how-to if it is simple.
+Keep everything age-appropriate and safe for a baby (no honey before 12 months, no added salt, avoid choking hazards).
+Example:
+Sweet potato mash | Steamed sweet potato mashed smooth with a little breast milk or formula. Mild and naturally sweet, a good first food.
+Avocado fingers | Ripe avocado cut into thick strips and rolled in ground oats so they are easy to grip.
+
+My baby's age or stage, and what I want ideas for: `;
+}
 function renderHaruki() {
-  $("tab-haruki").innerHTML = `<div class="card empty"><div class="big">🍙</div>
-    <h3 style="margin:10px 0 6px;color:var(--ink)">Haruki's dinner plan</h3>
-    <p class="muted" style="margin:0">Nothing here yet. This tab is reserved for Haruki's dinner plan.</p></div>`;
+  const ed = harukiEditId ? state.haruki.find(x => x.id === harukiEditId) : null;
+  if (harukiEditId && !ed) harukiEditId = null;
+  const items = state.haruki.slice().sort((a, b) => (a.tried - b.tried) || a.name.localeCompare(b.name));
+  let html = `<div class="card">
+    <strong>${ed ? "Edit idea" : "Add a food idea"}</strong>
+    <label>Name</label>
+    <input type="text" id="hName" placeholder="e.g. Sweet potato mash" value="${ed ? esc(ed.name) : ""}">
+    <label>Details (what it is, how it's served, how to make it)</label>
+    <textarea id="hNote" placeholder="e.g. Steamed sweet potato mashed smooth. Mild and sweet, a good first food.">${ed ? esc(ed.note || "") : ""}</textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="hSave">${ed ? "Save changes" : "Add idea"}</button>
+      ${ed ? `<button class="btn secondary" id="hCancel">Cancel</button>` : ""}
+    </div>
+  </div>
+  <div class="card">
+    <strong>⚡ Quick add many ideas</strong>
+    <p class="muted" style="margin:6px 0">One idea per line: <code>Name | details</code>. Same name = updates that idea. Tap “Copy AI prompt”, paste it into any AI chat, add what you want ideas for, then paste the answer here.</p>
+    <textarea id="hQuick" style="min-height:110px" placeholder="Sweet potato mash | Steamed and mashed smooth. Mild and sweet.&#10;Avocado fingers | Thick strips rolled in ground oats so they are easy to grip.">${esc(harukiDraft)}</textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" id="hQuickAdd">Add ideas</button><button class="btn secondary" id="hPrompt">📋 Copy AI prompt</button></div>
+    ${harukiMsg ? `<p style="margin:10px 0 0">${esc(harukiMsg)}</p>` : ""}
+  </div>
+  <h3>Ideas (${items.length})</h3>`;
+  if (!items.length) html += `<div class="card empty"><div class="big">🍙</div><p class="muted" style="margin:6px 0 0">No ideas yet. Add one above, or paste a list with Quick add.</p></div>`;
+  items.forEach(h => {
+    html += `<div class="card ${h.tried ? "tried" : ""}">
+      <div class="row"><strong class="grow">${esc(h.name)}</strong>
+        <button class="pill ${h.tried ? "on" : ""}" data-htry="${esc(h.id)}">${h.tried ? "✓ Tried" : "Tried?"}</button></div>
+      ${h.note ? `<p class="muted" style="margin:6px 0 0;white-space:pre-line">${esc(h.note)}</p>` : ""}
+      <div class="row" style="margin-top:10px">
+        <button class="btn secondary small" data-hedit="${esc(h.id)}">Edit</button>
+        <button class="btn secondary small" data-hdel="${esc(h.id)}">Delete</button></div>
+    </div>`;
+  });
+  const el = $("tab-haruki");
+  el.innerHTML = html;
+  el.querySelector("#hSave").onclick = () => {
+    const name = el.querySelector("#hName").value.trim();
+    if (!name) { alert("Give the idea a name."); return; }
+    const note = el.querySelector("#hNote").value.trim();
+    if (ed) { ed.name = name; ed.note = note; harukiEditId = null; }
+    else state.haruki.push({ id: uid(), name, note, tried: false });
+    save(); render();
+  };
+  const c = el.querySelector("#hCancel"); if (c) c.onclick = () => { harukiEditId = null; render(); };
+  el.querySelector("#hQuick").oninput = e => { harukiDraft = e.target.value; };
+  el.querySelector("#hQuickAdd").onclick = () => {
+    harukiMsg = addIdeasFromText(el.querySelector("#hQuick").value);
+    harukiDraft = ""; render();
+  };
+  el.querySelector("#hPrompt").onclick = async () => {
+    const t = ideaPrompt();
+    try { await navigator.clipboard.writeText(t); harukiMsg = "AI prompt copied. Paste it into any AI chat, add your baby's age and what you want ideas for at the end, then paste the answer in the box above."; render(); }
+    catch (e) { prompt("Copy this:", t); }
+  };
+  el.querySelectorAll("[data-htry]").forEach(b => b.onclick = () => { const h = state.haruki.find(x => x.id === b.dataset.htry); if (h) { h.tried = !h.tried; save(); render(); } });
+  el.querySelectorAll("[data-hedit]").forEach(b => b.onclick = () => { harukiEditId = b.dataset.hedit; render(); window.scrollTo(0, 0); });
+  el.querySelectorAll("[data-hdel]").forEach(b => b.onclick = () => {
+    snap("Idea deleted");
+    state.haruki = state.haruki.filter(x => x.id !== b.dataset.hdel);
+    save(); render();
+  });
 }
 
-function render() { renderWeek(); renderDishes(); renderShop(); renderHaruki(); }
+/* ---------- Render: Cleaning checklist ---------- */
+let cleanFilter = "all", cleanEdit = false, cleanAddRoom = "all", cleanFocus = false;
+const CLEAN_NEXT = { "": "mom", mom: "dad", dad: "" };
+function renderClean() {
+  const all = state.cleaning;
+  const total = all.length, done = all.filter(t => t.done).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const cnt = who => all.filter(t => t.who === who).length;
+  const filters = [["all", "Everyone"], ["mom", `${COOKS.mom} (${cnt("mom")})`], ["dad", `${COOKS.dad} (${cnt("dad")})`]];
+  let html = `<div class="card">
+    <div class="gh"><strong>${done} of ${total} done</strong><span class="count">${pct}%</span></div>
+    <div class="bar"><div style="width:${pct}%"></div></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="cleanReset" ${done ? "" : "disabled"}>↺ Reset all</button>
+      <button class="btn secondary" id="cleanEdit">${cleanEdit ? "✓ Done editing" : "✎ Edit & assign"}</button>
+    </div>
+    <div class="row" style="margin-top:12px">${filters.map(([k, l]) => `<button class="pill ${cleanFilter === k ? "on" : ""}" data-cfilter="${k}">${l}</button>`).join("")}</div>
+  </div>`;
+  if (cleanEdit) html += `<div class="card"><strong>Add a task</strong>
+    <div class="row" style="margin-top:8px"><select id="cRoom" style="width:auto">${ROOMS.map(([k, l]) => `<option value="${k}" ${k === cleanAddRoom ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <input type="text" id="cText" class="grow" placeholder="e.g. Clean the windows" autocomplete="off"><button class="btn" id="cAdd">Add</button></div>
+    <p class="muted" style="margin:8px 0 0;font-size:.82rem">Tip: tap a task's name below to rename it.</p></div>`;
+  ROOMS.forEach(([rid, rlabel]) => {
+    const inRoom = all.filter(t => t.room === rid);
+    const list = inRoom.filter(t => cleanFilter === "all" || t.who === cleanFilter);
+    if (!list.length && !(cleanEdit && cleanFilter === "all")) return;
+    const d = inRoom.filter(t => t.done).length;
+    html += `<div class="card"><div class="gh"><strong>${rlabel}</strong><span class="count">${d}/${inRoom.length}</span></div>`;
+    if (cleanEdit) html += `<div class="row" style="margin:6px 0 4px"><span class="muted" style="font-size:.82rem">Assign whole room:</span>
+      <button class="pill" data-aroom="${rid}:mom">${COOKS.mom}</button><button class="pill" data-aroom="${rid}:dad">${COOKS.dad}</button><button class="pill" data-aroom="${rid}:">clear</button></div>`;
+    html += `<ul class="shop">` + list.map(t => `<li class="${t.done ? "done" : ""}">
+      <input type="checkbox" data-ct="${esc(t.id)}" ${t.done ? "checked" : ""}>
+      ${cleanEdit ? `<input type="text" class="grow cedit" data-cedit="${esc(t.id)}" value="${esc(t.text)}" aria-label="Task name">` : `<span class="lbl grow">${esc(t.text)}</span>`}
+      ${cleanEdit ? "" : `<button class="pill ${t.who ? "on" : ""}" data-cwho="${esc(t.id)}">${COOKS[t.who] || "＋ Assign"}</button>`}
+      ${cleanEdit ? `<button class="btn secondary small" data-cdel="${esc(t.id)}" title="Remove task">✕</button>` : ""}
+    </li>`).join("") + `</ul></div>`;
+  });
+  if (!all.length) html += `<p class="muted">The list is empty. Tap “Edit & assign” to add tasks.</p>`;
+  else if (cleanFilter !== "all" && !all.some(t => t.who === cleanFilter)) html += `<p class="muted">No tasks assigned to ${COOKS[cleanFilter]} yet. Tap “Everyone”, then tap “＋ Assign” on a task.</p>`;
+  const el = $("tab-clean");
+  el.innerHTML = html;
+  el.querySelector("#cleanReset").onclick = () => { snap("Cleaning reset"); state.cleaning.forEach(t => t.done = false); save(); renderClean(); };
+  el.querySelector("#cleanEdit").onclick = () => { cleanEdit = !cleanEdit; if (cleanEdit) cleanFilter = "all"; renderClean(); };
+  el.querySelectorAll("[data-cfilter]").forEach(b => b.onclick = () => { cleanFilter = b.dataset.cfilter; renderClean(); });
+  el.querySelectorAll("[data-ct]").forEach(cb => cb.onchange = () => { const t = state.cleaning.find(x => x.id === cb.dataset.ct); if (t) { t.done = cb.checked; save(); renderClean(); } });
+  el.querySelectorAll("[data-cwho]").forEach(b => b.onclick = () => { const t = state.cleaning.find(x => x.id === b.dataset.cwho); if (t) { t.who = CLEAN_NEXT[t.who || ""]; save(); renderClean(); } });
+  el.querySelectorAll("[data-cdel]").forEach(b => b.onclick = () => { snap("Task removed"); state.cleaning = state.cleaning.filter(x => x.id !== b.dataset.cdel); save(); renderClean(); });
+  el.querySelectorAll("[data-aroom]").forEach(b => b.onclick = () => {
+    const [rid, who] = b.dataset.aroom.split(":");
+    snap(who ? "Room assigned" : "Assignments cleared");
+    state.cleaning.filter(t => t.room === rid).forEach(t => t.who = who);
+    save(); renderClean();
+  });
+  el.querySelectorAll("[data-cedit]").forEach(inp => inp.onchange = () => {
+    const t = state.cleaning.find(x => x.id === inp.dataset.cedit); if (!t) return;
+    const v = inp.value.trim();
+    if (v) { t.text = v; save(); } else inp.value = t.text;   // an empty name is not allowed
+  });
+  const add = () => {
+    const txt = el.querySelector("#cText").value.trim(); if (!txt) return;
+    cleanAddRoom = el.querySelector("#cRoom").value;
+    state.cleaning.push({ id: uid(), room: cleanAddRoom, text: txt, done: false, who: "" });
+    cleanFocus = true; save(); renderClean();
+  };
+  const ab = el.querySelector("#cAdd");
+  if (ab) {
+    ab.onclick = add;
+    el.querySelector("#cText").onkeydown = e => { if (e.key === "Enter") add(); };
+    el.querySelector("#cRoom").onchange = e => { cleanAddRoom = e.target.value; };
+    if (cleanFocus) { cleanFocus = false; el.querySelector("#cText").focus(); }
+  }
+}
+
+function render() { renderWeek(); renderDishes(); renderShop(); renderHaruki(); renderClean(); }
 
 /* ---------- Shared sync (Firebase Realtime Database, REST) ---------- */
 const DEFAULT_SYNC_URL = "https://kimurafoodplan-default-rtdb.europe-west1.firebasedatabase.app";
@@ -855,13 +1079,16 @@ function clock() { return new Date().toLocaleTimeString([], { hour: "2-digit", m
 function toRemote() {
   return {
     v: DATA_V,
-    dishes: state.dishes.map(d => ({ id: d.id, name: d.name, ingredients: d.ingredients, type: d.type || "other", weekend: !!d.weekend })),
+    dishes: state.dishes.map(d => ({ id: d.id, name: d.name, ingredients: d.ingredients, type: d.type || "other", weekend: !!d.weekend, paused: !!d.paused })),
     week: DAYS.map((_, i) => { const w = state.week[i]; return w ? { dishId: w.dishId || "", locked: !!w.locked, done: !!w.done, cook: w.cook || "", histId: w.histId || "" } : { dishId: "", locked: false, done: false, cook: "", histId: "" }; }),
     checked: Object.keys(state.checked).filter(k => state.checked[k]),
     settings: state.settings,
     pantry: state.pantry,
     extras: state.extras.map(e => ({ id: e.id, text: e.text, done: !!e.done })),
     history: state.history.map(h => ({ id: h.id, dishId: h.dishId, name: h.name, ts: h.ts, cook: h.cook || "" })),
+    haruki: state.haruki.map(h => ({ id: h.id, name: h.name, note: h.note || "", tried: !!h.tried })),
+    cleanInit: true,   // lets an empty cleaning list stay empty (the database drops empty lists)
+    cleaning: state.cleaning.map(t => ({ id: t.id, room: t.room, text: t.text, done: !!t.done, who: t.who || "" })),
     // stored as a list of pairs because database keys can't contain characters like "." or "/"
     groupOverride: Object.entries(state.groupOverride).map(([k, g]) => ({ k, g })),
     updatedAt: state.updatedAt
@@ -869,7 +1096,7 @@ function toRemote() {
 }
 function fromRemote(r) {
   const list = v => Array.isArray(v) ? v : Object.values(v || {});
-  const dishes = list(r.dishes).filter(Boolean).map(d => ({ id: d.id, name: d.name, ingredients: list(d.ingredients), type: d.type || "other", weekend: !!d.weekend }));
+  const dishes = list(r.dishes).filter(Boolean).map(d => ({ id: d.id, name: d.name, ingredients: list(d.ingredients), type: d.type || "other", weekend: !!d.weekend, paused: !!d.paused }));
   const wk = r.week || {}; const week = {};
   DAYS.forEach((_, i) => { const w = wk[i]; if (w && w.dishId) week[i] = { dishId: w.dishId, locked: !!w.locked, done: !!w.done, cook: w.cook || "", histId: w.histId || "" }; });
   const checked = {}; list(r.checked).forEach(k => checked[k] = true);
@@ -881,6 +1108,8 @@ function fromRemote(r) {
     pantry: list(r.pantry).map(String),
     extras: list(r.extras).filter(Boolean).map(e => ({ id: e.id, text: e.text, done: !!e.done })),
     history: list(r.history).filter(Boolean).map(h => ({ id: h.id, dishId: h.dishId, name: h.name, ts: h.ts, cook: h.cook || "" })),
+    haruki: list(r.haruki).filter(Boolean).map(h => ({ id: h.id, name: h.name, note: h.note || "", tried: !!h.tried })),
+    cleaning: r.cleanInit ? list(r.cleaning).filter(Boolean).map(t => ({ id: t.id, room: t.room, text: t.text, done: !!t.done, who: t.who || "" })) : undefined,
     updatedAt: r.updatedAt || 0
   };
 }
