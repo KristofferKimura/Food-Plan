@@ -1,4 +1,4 @@
-# Family Food Plan
+# Family Food Plan v2
 
 A single-file web app (`index.html`). No server, no database, no build step.
 
